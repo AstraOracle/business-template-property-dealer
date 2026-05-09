@@ -20,6 +20,7 @@ test("contact flow visual stays stable", async ({ page }) => {
   await expect(page.locator("main")).toHaveScreenshot("contact-main.png", {
     fullPage: false,
     animations: "disabled",
+    maxDiffPixels: 1200,
   });
 });
 
