@@ -6,6 +6,16 @@ function formatMessageLines(lines) {
   return lines.filter(Boolean).join("\n");
 }
 
+function toTitleCase(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 export function buildConsultationWhatsAppUrl({
   whatsappNumber,
   businessName,
@@ -83,6 +93,47 @@ export function generateLeadFormMessage({
     notes ? `Notes: ${notes}` : "",
     sourcePage ? `Source Page: ${sourcePage}` : "",
   ]);
+}
+
+export function generateDealerLeadAlertMessage({
+  intent = "",
+  propertyType = "",
+  locality = "",
+  budget = "",
+  timeline = "",
+  timelineToSell = "",
+  name = "",
+  phone = "",
+}) {
+  const resolvedTimeline = timeline || timelineToSell;
+
+  return formatMessageLines([
+    "🔥 New Lead",
+    "",
+    `Intent: ${toTitleCase(intent) || "General"}`,
+    propertyType ? `Property Type: ${propertyType}` : "",
+    locality ? `Location: ${locality}` : "",
+    budget ? `Budget: ${budget}` : "",
+    resolvedTimeline ? `Timeline: ${resolvedTimeline}` : "",
+    name ? `Name: ${name}` : "",
+    phone ? `Phone: ${phone}` : "",
+  ]);
+}
+
+export function buildDealerLeadAlertLink({ whatsappNumber, lead }) {
+  return generateWhatsAppLink(
+    whatsappNumber,
+    generateDealerLeadAlertMessage({
+      intent: lead.intent || lead.leadType,
+      propertyType: lead.propertyType,
+      locality: lead.locality,
+      budget: lead.budget,
+      timeline: lead.timeline,
+      timelineToSell: lead.timelineToSell,
+      name: lead.name,
+      phone: lead.phone,
+    }),
+  );
 }
 
 export function generateSiteVisitMessage({

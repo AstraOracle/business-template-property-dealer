@@ -5,10 +5,11 @@ This folder contains the deployable Google Apps Script code for the property dea
 ## What It Handles
 
 - public lead submission from the website
-- admin data fetch for settings, properties, localities, testimonials, and FAQs
-- admin save actions for editable sections
-- lead inbox fetch
-- lead status updates
+- public site-content fetch for the live website
+- protected admin data fetch for settings, properties, localities, testimonials, and FAQs
+- protected admin save actions for editable sections
+- protected lead inbox fetch
+- protected lead status updates
 
 ## Deployment Flow
 
@@ -44,7 +45,6 @@ Set these in your site deployment:
 ```env
 VITE_GOOGLE_APPS_SCRIPT_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
 VITE_ADMIN_APPS_SCRIPT_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
-VITE_ADMIN_LITE_PASSWORD=ggndealer123
 ```
 
 You can use the same deployed Apps Script URL for both:
@@ -62,8 +62,9 @@ You can use the same deployed Apps Script URL for both:
 
 ### GET
 
-- `?action=fetch-admin-data`
-- `?action=fetch-leads`
+- `?action=fetch-site-content`
+- `?action=fetch-admin-data&password=...`
+- `?action=fetch-leads&password=...`
 
 ### POST
 
@@ -71,6 +72,8 @@ You can use the same deployed Apps Script URL for both:
   - no `action`
 - admin save:
   - `action: "save-admin-section"`
+- password verify:
+  - `action: "verify-admin-password"`
 - password update:
   - `action: "update-admin-password"`
 - lead status update:

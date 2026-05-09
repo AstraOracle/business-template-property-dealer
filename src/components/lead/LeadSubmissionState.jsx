@@ -9,6 +9,8 @@ export function LeadSubmissionState({
   secondaryLabel,
   onSecondaryAction,
   errorMessage = "",
+  dealerAlertLabel = "",
+  dealerAlertHref = "",
 }) {
   const badgeLabel = status === "success" ? "Lead saved" : "Save failed";
   const badgeClass =
@@ -52,6 +54,17 @@ export function LeadSubmissionState({
           >
             {actionLabel}
           </a>
+
+          {dealerAlertLabel && dealerAlertHref ? (
+            <a
+              href={dealerAlertHref}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-soft inline-flex w-full items-center justify-center px-5 py-3 text-sm font-semibold transition duration-300 sm:w-auto"
+            >
+              {dealerAlertLabel}
+            </a>
+          ) : null}
 
           {secondaryLabel && onSecondaryAction ? (
             <button

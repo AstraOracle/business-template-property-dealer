@@ -1,5 +1,5 @@
 import { siteConfig } from "../config/siteConfig";
-import { generateLeadFormMessage, generateSiteVisitMessage, generateWhatsAppLink } from "./contact";
+import { buildDealerLeadAlertLink, generateLeadFormMessage, generateSiteVisitMessage, generateWhatsAppLink } from "./contact";
 
 function formatLeadTypeLabel(value) {
   const normalized = String(value ?? "").toLowerCase();
@@ -33,6 +33,13 @@ export function generateLeadInboxWhatsAppLink(lead) {
       notes: "Hello, we reviewed your enquiry and are ready to assist with the next step.",
     }),
   );
+}
+
+export function generateDealerAlertWhatsAppLink(lead) {
+  return buildDealerLeadAlertLink({
+    whatsappNumber: siteConfig.whatsappNumber,
+    lead,
+  });
 }
 
 export function generateSendOptionsWhatsAppLink(lead) {

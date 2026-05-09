@@ -89,9 +89,9 @@ function mergeRemoteContent(remoteData) {
 }
 
 export async function loadRemoteSiteContent() {
-  const adminAppsScriptUrl = import.meta.env.VITE_ADMIN_APPS_SCRIPT_URL;
+  const publicAppsScriptUrl = import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL || import.meta.env.VITE_ADMIN_APPS_SCRIPT_URL;
 
-  if (!adminAppsScriptUrl) {
+  if (!publicAppsScriptUrl) {
     return {
       ok: false,
       skipped: true,
@@ -99,8 +99,8 @@ export async function loadRemoteSiteContent() {
   }
 
   try {
-    const url = new URL(adminAppsScriptUrl);
-    url.searchParams.set("action", "fetch-admin-data");
+    const url = new URL(publicAppsScriptUrl);
+    url.searchParams.set("action", "fetch-site-content");
 
     const response = await fetch(url.toString(), {
       method: "GET",

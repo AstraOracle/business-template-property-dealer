@@ -2,6 +2,11 @@
 Sample lead payload sent to Google Apps Script:
 {
   "timestamp": "2026-04-18T23:59:59.000Z",
+  "createdAt": "2026-04-18T23:59:59.000Z",
+  "lastUpdatedAt": "2026-04-18T23:59:59.000Z",
+  "status": "New",
+  "score": "HOT",
+  "intent": "buy",
   "sourcePage": "Contact Page",
   "leadType": "buy",
   "inquiryType": "Buy Inquiry",
@@ -10,6 +15,7 @@ Sample lead payload sent to Google Apps Script:
   "city": "Gurugram",
   "budget": "Rs 7 Cr+",
   "propertyType": "Apartment",
+  "timeline": "Within 30 days",
   "expectedPrice": "",
   "timelineToSell": "",
   "name": "Ritika Sethi",

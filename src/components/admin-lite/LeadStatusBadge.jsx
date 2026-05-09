@@ -1,7 +1,6 @@
 const statusStyles = {
   new: "bg-[rgba(183,121,43,0.12)] text-[var(--color-accent-deep)]",
   contacted: "bg-[rgba(37,99,235,0.12)] text-[#1d4ed8]",
-  follow_up: "bg-[rgba(142,58,34,0.12)] text-[#8e3a22]",
   closed: "bg-[rgba(22,101,52,0.12)] text-[#166534]",
 };
 
@@ -12,7 +11,8 @@ function formatStatusLabel(status) {
 }
 
 export function LeadStatusBadge({ status }) {
-  const resolvedStatus = statusStyles[status] ? status : "new";
+  const normalizedStatus = String(status ?? "new").trim().toLowerCase().replace(/\s+/g, "_");
+  const resolvedStatus = statusStyles[normalizedStatus] ? normalizedStatus : "new";
 
   return (
     <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] ${statusStyles[resolvedStatus]}`}>

@@ -10,21 +10,24 @@ import { LeadInboxList } from "../components/admin-lite/LeadInboxList";
 import { SecuritySettingsEditor } from "../components/admin-lite/SecuritySettingsEditor";
 import { SettingsEditor } from "../components/admin-lite/SettingsEditor";
 import {
+  clearAdminSessionPassword,
   fetchAdminData,
   fetchAdminSettings,
   fetchLeadInbox,
-  getAdminLitePassword,
   getFallbackAdminData,
   saveFaq,
   saveLocalities,
   saveProperties,
   saveSettings,
+  setAdminSessionPassword,
   saveThemeSettings,
   saveTestimonials,
   updateAdminPassword,
   updateLeadStatus,
+  verifyAdminPassword,
 } from "../utils/adminApi";
 import {
+  generateDealerAlertWhatsAppLink,
   generateLeadInboxWhatsAppLink,
   generateScheduleVisitWhatsAppLink,
   generateSendOptionsWhatsAppLink,
@@ -68,6 +71,8 @@ const initialAdminState = {
 };
 
 const fallbackAdminState = getFallbackAdminData();
+const leadScoreOrder = { HOT: 0, WARM: 1, COLD: 2 };
+const leadStatusOrder = { New: 0, Contacted: 1, Closed: 2 };
 
 const propertyFields = [
   { key: "title", label: "Title" },
@@ -205,7 +210,6 @@ export function AdminLitePage() {
   });
   const [activeSection, setActiveSection] = useState("settings");
   const [adminData, setAdminData] = useState(fallbackAdminState || initialAdminState);
-  const [configuredPassword, setConfiguredPassword] = useState(() => getAdminLitePassword());
   const [isPasswordLoading, setIsPasswordLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -213,8 +217,50 @@ export function AdminLitePage() {
   const [leads, setLeads] = useState([]);
   const [isLeadLoading, setIsLeadLoading] = useState(false);
   const [leadLoadError, setLeadLoadError] = useState("");
-  const [leadFilters, setLeadFilters] = useState({ leadType: "all", locality: "all" });
+  const [leadFilters, setLeadFilters] = useState({
+    leadType: "all",
+    locality: "all",
+    sortBy: "priority",
+    hotOnly: false,
+    uncontactedOnly: false,
+  });
   const [updatingLeadId, setUpdatingLeadId] = useState("");
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return undefined;
+    }
+
+    const previousTitle = document.title;
+    document.title = "Admin Lite | Hidden content editor";
+
+    let robotsMeta = document.querySelector('meta[name="robots"]');
+    const createdMeta = !robotsMeta;
+
+    if (!robotsMeta) {
+      robotsMeta = document.createElement("meta");
+      robotsMeta.setAttribute("name", "robots");
+      document.head.appendChild(robotsMeta);
+    }
+
+    const previousRobots = robotsMeta.getAttribute("content");
+    robotsMeta.setAttribute("content", "noindex, nofollow, noarchive");
+
+    return () => {
+      document.title = previousTitle;
+
+      if (createdMeta) {
+        robotsMeta.remove();
+        return;
+      }
+
+      if (previousRobots) {
+        robotsMeta.setAttribute("content", previousRobots);
+      } else {
+        robotsMeta.removeAttribute("content");
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -231,7 +277,6 @@ export function AdminLitePage() {
           ...current,
           settings: result.data,
         }));
-        setConfiguredPassword(getAdminLitePassword(result.data));
         applyThemeVariables(result.data.theme);
       }
     }
@@ -264,7 +309,6 @@ export function AdminLitePage() {
 
       if (result.data) {
         setAdminData(result.data);
-        setConfiguredPassword(getAdminLitePassword(result.data.settings));
         applyThemeVariables(result.data.settings.theme);
       }
 
@@ -295,21 +339,37 @@ export function AdminLitePage() {
     };
   }, [isUnlocked]);
 
-  function handleUnlock(inputPassword) {
-    if (!configuredPassword || inputPassword !== configuredPassword) {
-      return false;
-    }
+  async function handleUnlock(inputPassword) {
+    setIsPasswordLoading(true);
 
-    window.sessionStorage.setItem(ADMIN_SESSION_KEY, "true");
-    setIsUnlocked(true);
-    return true;
+    try {
+      const result = await verifyAdminPassword(inputPassword);
+
+      if (!result.ok) {
+        return false;
+      }
+
+      setAdminSessionPassword(inputPassword);
+      window.sessionStorage.setItem(ADMIN_SESSION_KEY, "true");
+      setIsUnlocked(true);
+      return true;
+    } finally {
+      setIsPasswordLoading(false);
+    }
   }
 
   function handleLogout() {
+    clearAdminSessionPassword();
     window.sessionStorage.removeItem(ADMIN_SESSION_KEY);
     setIsUnlocked(false);
     setActiveSection("settings");
-      setLeadFilters({ leadType: "all", locality: "all" });
+      setLeadFilters({
+        leadType: "all",
+        locality: "all",
+        sortBy: "priority",
+        hotOnly: false,
+        uncontactedOnly: false,
+      });
       setSaveStatus({});
       setUpdatingLeadId("");
       setIsRefreshing(false);
@@ -517,18 +577,6 @@ export function AdminLitePage() {
   }
 
   async function handlePasswordUpdate(formValues) {
-    if (formValues.currentPassword !== configuredPassword) {
-      setSaveStatus((current) => ({
-        ...current,
-        security: {
-          isSaving: false,
-          message: "",
-          error: "Current password does not match the active admin password.",
-        },
-      }));
-      return { ok: false };
-    }
-
     if (formValues.newPassword.trim().length < 8) {
       setSaveStatus((current) => ({
         ...current,
@@ -562,10 +610,10 @@ export function AdminLitePage() {
       },
     }));
 
-    const result = await updateAdminPassword(formValues.newPassword, adminData.settings);
+    const result = await updateAdminPassword(formValues.currentPassword, formValues.newPassword, adminData.settings);
 
     if (result.ok || result.skipped) {
-      setConfiguredPassword(formValues.newPassword);
+      setAdminSessionPassword(formValues.newPassword);
       setAdminData((current) => ({
         ...current,
         settings: {
@@ -594,7 +642,7 @@ export function AdminLitePage() {
   }
 
   const leadTypeOptions = useMemo(() => {
-    return ["all", ...new Set(leads.map((lead) => lead.leadType).filter(Boolean))];
+    return ["all", ...new Set(leads.map((lead) => lead.intent || lead.leadType).filter(Boolean))];
   }, [leads]);
 
   const localityOptions = useMemo(() => {
@@ -603,15 +651,37 @@ export function AdminLitePage() {
 
   const filteredLeads = useMemo(() => {
     return [...leads]
-      .filter((lead) => leadFilters.leadType === "all" || lead.leadType === leadFilters.leadType)
+      .filter((lead) => leadFilters.leadType === "all" || (lead.intent || lead.leadType) === leadFilters.leadType)
       .filter((lead) => leadFilters.locality === "all" || lead.locality === leadFilters.locality)
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      .filter((lead) => !leadFilters.hotOnly || lead.score === "HOT")
+      .filter((lead) => !leadFilters.uncontactedOnly || lead.status === "New")
+      .sort((a, b) => {
+        if (leadFilters.sortBy === "priority") {
+          const scoreDiff = (leadScoreOrder[a.score] ?? 99) - (leadScoreOrder[b.score] ?? 99);
+
+          if (scoreDiff !== 0) {
+            return scoreDiff;
+          }
+
+          return new Date(b.createdAt || b.timestamp).getTime() - new Date(a.createdAt || a.timestamp).getTime();
+        }
+
+        if (leadFilters.sortBy === "uncontacted") {
+          const statusDiff = (leadStatusOrder[a.status] ?? 99) - (leadStatusOrder[b.status] ?? 99);
+
+          if (statusDiff !== 0) {
+            return statusDiff;
+          }
+        }
+
+        return new Date(b.createdAt || b.timestamp).getTime() - new Date(a.createdAt || a.timestamp).getTime();
+      });
   }, [leadFilters, leads]);
 
   if (!isUnlocked) {
     return (
       <AdminPasswordGate
-        hasConfiguredPassword={Boolean(configuredPassword)}
+        hasConfiguredPassword
         helperText="Use the current admin password to open the hidden editor."
         isLoading={isPasswordLoading}
         onUnlock={handleUnlock}
@@ -619,11 +689,11 @@ export function AdminLitePage() {
     );
   }
 
-  async function handleMarkContacted(lead) {
+  async function handleLeadStatusChange(lead, nextStatus) {
     setUpdatingLeadId(lead.id);
 
     try {
-      const result = await updateLeadStatus(lead.id, "contacted");
+      const result = await updateLeadStatus(lead.id, nextStatus);
 
       if (result.ok || result.skipped) {
         setLeads((current) =>
@@ -631,7 +701,9 @@ export function AdminLitePage() {
             item.id === lead.id
               ? {
                   ...item,
-                  status: "contacted",
+                  status: nextStatus,
+                  lastUpdatedAt: new Date().toISOString(),
+                  score: nextStatus === "Closed" ? "HOT" : item.score,
                 }
               : item,
           ),
@@ -846,6 +918,9 @@ export function AdminLitePage() {
           <LeadInboxFilters
             leadType={leadFilters.leadType}
             locality={leadFilters.locality}
+            sortBy={leadFilters.sortBy}
+            hotOnly={leadFilters.hotOnly}
+            uncontactedOnly={leadFilters.uncontactedOnly}
             leadTypeOptions={leadTypeOptions}
             localityOptions={localityOptions}
             onChange={updateLeadFilter}
@@ -853,7 +928,8 @@ export function AdminLitePage() {
           <LeadInboxList
             leads={filteredLeads}
             isUpdating={updatingLeadId}
-            onMarkContacted={handleMarkContacted}
+            onUpdateStatus={handleLeadStatusChange}
+            getDealerAlertLink={generateDealerAlertWhatsAppLink}
             getOpenWhatsAppLink={generateLeadInboxWhatsAppLink}
             getSendOptionsLink={generateSendOptionsWhatsAppLink}
             getScheduleVisitLink={generateScheduleVisitWhatsAppLink}

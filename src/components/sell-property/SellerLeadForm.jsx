@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { LeadSubmissionState } from "../lead/LeadSubmissionState";
 import {
+  buildDealerAlertWhatsAppUrl,
   buildLeadWhatsAppUrl,
   buildLeadPayload,
   prepareGoogleSheetsPayload,
@@ -15,7 +16,7 @@ const defaultValues = {
   propertyType: "",
   sellLocality: "",
   expectedPrice: "",
-  timelineToSell: "",
+  timeline: "",
   name: "",
   phone: "",
   notes: "",
@@ -74,8 +75,8 @@ export function SellerLeadForm({ sourcePage, city, businessName, whatsappNumber,
     if (!values.expectedPrice.trim()) {
       nextErrors.expectedPrice = "Enter the expected price.";
     }
-    if (!values.timelineToSell) {
-      nextErrors.timelineToSell = "Choose the selling timeline.";
+    if (!values.timeline) {
+      nextErrors.timeline = "Choose the selling timeline.";
     }
 
     setErrors(nextErrors);
@@ -102,6 +103,7 @@ export function SellerLeadForm({ sourcePage, city, businessName, whatsappNumber,
         },
       });
       const whatsappUrl = buildLeadWhatsAppUrl(whatsappNumber, payload);
+      const dealerAlertUrl = buildDealerAlertWhatsAppUrl(whatsappNumber, payload);
       const googleSheetsPayload = prepareGoogleSheetsPayload(payload);
       const sheetSubmission = await submitLeadToSheet(googleSheetsPayload);
 
@@ -110,6 +112,7 @@ export function SellerLeadForm({ sourcePage, city, businessName, whatsappNumber,
         payload,
         googleSheetsPayload,
         whatsappUrl,
+        dealerAlertUrl,
         sheetSubmission,
       };
 
@@ -132,6 +135,7 @@ export function SellerLeadForm({ sourcePage, city, businessName, whatsappNumber,
         payload: fallbackPayload,
         googleSheetsPayload: prepareGoogleSheetsPayload(fallbackPayload),
         whatsappUrl: buildLeadWhatsAppUrl(whatsappNumber, fallbackPayload),
+        dealerAlertUrl: buildDealerAlertWhatsAppUrl(whatsappNumber, fallbackPayload),
         sheetSubmission: {
           ok: false,
           status: 0,
@@ -164,6 +168,8 @@ export function SellerLeadForm({ sourcePage, city, businessName, whatsappNumber,
           payload={submissionResult.payload}
           actionLabel="Continue to WhatsApp"
           actionHref={submissionResult.whatsappUrl}
+          dealerAlertLabel="Dealer alert link"
+          dealerAlertHref={submissionResult.dealerAlertUrl}
           secondaryLabel="Submit another seller lead"
           onSecondaryAction={resetForm}
         />
@@ -275,8 +281,8 @@ export function SellerLeadForm({ sourcePage, city, businessName, whatsappNumber,
           <label className="grid gap-2">
             <span className="text-sm font-semibold text-[var(--color-text)]">Timeline to sell</span>
             <select
-              value={values.timelineToSell}
-              onChange={(event) => updateValue("timelineToSell", event.target.value)}
+              value={values.timeline}
+              onChange={(event) => updateValue("timeline", event.target.value)}
               className="form-select"
               disabled={isSubmitting}
             >
@@ -287,7 +293,7 @@ export function SellerLeadForm({ sourcePage, city, businessName, whatsappNumber,
                 </option>
               ))}
             </select>
-            {renderFieldError("timelineToSell")}
+            {renderFieldError("timeline")}
           </label>
         </div>
 

@@ -9,11 +9,14 @@ import {
   persistSiteSettings,
   SITE_SETTINGS_STORAGE_KEY,
 } from "./theme";
+import { computeLeadScore } from "./lead";
 
 const ADMIN_APPS_SCRIPT_URL = import.meta.env.VITE_ADMIN_APPS_SCRIPT_URL;
+const PUBLIC_APPS_SCRIPT_URL = import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL || ADMIN_APPS_SCRIPT_URL;
 const ADMIN_LITE_PASSWORD = import.meta.env.VITE_ADMIN_LITE_PASSWORD;
-const DEFAULT_ADMIN_PASSWORD = "ggndealer123";
+const DEFAULT_ADMIN_PASSWORD = "change-me-admin";
 const ADMIN_LOCAL_DATA_STORAGE_KEY = "admin-lite-data";
+const ADMIN_SESSION_PASSWORD_STORAGE_KEY = "admin-lite-password";
 
 /*
 Sample Apps Script admin payload:
@@ -47,36 +50,54 @@ const fallbackLeads = [
     id: "lead-001",
     name: "Ritika Sethi",
     phone: "+91 98765 43210",
+    intent: "buy",
     leadType: "buy",
+    propertyType: "Apartment",
     locality: "Golf Course Road",
     budget: "Rs 15 Cr - Rs 18 Cr",
+    timeline: "Within 30 days",
     sourcePage: "Homepage Hero",
     timestamp: "2026-04-18T09:30:00.000Z",
-    status: "new",
+    createdAt: "2026-04-18T09:30:00.000Z",
+    lastUpdatedAt: "2026-04-18T09:30:00.000Z",
+    status: "New",
+    score: "HOT",
     notes: "Looking for a 4BHK primary residence with fast site visit scheduling.",
   },
   {
     id: "lead-002",
     name: "Neha Arora",
     phone: "+91 91234 56789",
+    intent: "rent",
     leadType: "rent",
-    locality: "Kalyani Nagar",
+    propertyType: "Apartment",
+    locality: "Golf Course Road",
     budget: "Rs 1.5 L - Rs 2.5 L / month",
+    timeline: "Immediate",
     sourcePage: "Rent Listings",
     timestamp: "2026-04-18T07:45:00.000Z",
-    status: "contacted",
+    createdAt: "2026-04-18T07:45:00.000Z",
+    lastUpdatedAt: "2026-04-18T10:15:00.000Z",
+    status: "Contacted",
+    score: "WARM",
     notes: "Corporate relocation requirement with furnished preference.",
   },
   {
     id: "lead-003",
     name: "Vikram Malhotra",
     phone: "+91 99887 76655",
+    intent: "sell",
     leadType: "sell",
-    locality: "Worli",
+    propertyType: "Builder Floor",
+    locality: "DLF Phase 5",
     budget: "Expected Rs 11 Cr+",
+    timeline: "Within 60 days",
     sourcePage: "Sell Property Page",
     timestamp: "2026-04-17T18:20:00.000Z",
-    status: "follow_up",
+    createdAt: "2026-04-17T18:20:00.000Z",
+    lastUpdatedAt: "2026-04-18T12:45:00.000Z",
+    status: "Closed",
+    score: "HOT",
     notes: "Owner wants positioning help and verified buyer outreach.",
   },
 ];
@@ -102,6 +123,47 @@ function coerceNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeLeadStatus(value) {
+  const normalized = String(value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+
+  if (normalized === "contacted" || normalized === "follow_up") {
+    return "Contacted";
+  }
+
+  if (normalized === "closed") {
+    return "Closed";
+  }
+
+  return "New";
+}
+
+function normalizeLeadScore(value, fallback = "WARM") {
+  const normalized = String(value ?? "").trim().toUpperCase();
+
+  if (normalized === "HOT" || normalized === "WARM" || normalized === "COLD") {
+    return normalized;
+  }
+
+  return fallback;
+}
+
+function inferLeadScore(item, status) {
+  if (item.score) {
+    return normalizeLeadScore(item.score);
+  }
+
+  if (status === "Closed") {
+    return "HOT";
+  }
+
+  return computeLeadScore({
+    budget: item.budget || item.budget_range || item.expected_price || "",
+    timeline: item.timeline || item.timelineToSell || item.timeline_to_sell || "",
+    locality: item.locality || item.preferred_locality || "",
+    propertyType: item.propertyType || item.property_type || "",
+  });
+}
+
 function normalizeImageList(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -124,7 +186,7 @@ function buildDefaultSettings() {
     logoUrl: siteConfig.logoUrl || "",
     heroImageUrl: siteConfig.heroImageUrl || "",
     mapEmbedUrl: siteConfig.mapEmbedUrl || "",
-    adminPassword: getDefaultAdminPassword(),
+    adminPassword: "",
     theme: normalizeThemeSettings(DEFAULT_THEME_SETTINGS),
   };
 }
@@ -151,6 +213,42 @@ function setStorageItem(key, value) {
     window.localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // Ignore storage failures and keep the admin usable.
+  }
+}
+
+function getSessionStorageItem(key) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function setSessionStorageItem(key, value) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // Ignore session storage failures and keep admin usable.
+  }
+}
+
+function removeSessionStorageItem(key) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore session storage failures and keep admin usable.
   }
 }
 
@@ -194,6 +292,7 @@ function buildFallbackAdminData() {
 
 function normalizeSettings(settings = {}) {
   const defaults = buildDefaultSettings();
+  const hasExplicitAdminPassword = Object.prototype.hasOwnProperty.call(settings || {}, "adminPassword");
   const nextSettings = {
     ...defaults,
   };
@@ -206,7 +305,7 @@ function normalizeSettings(settings = {}) {
 
   return {
     ...nextSettings,
-    adminPassword: resolveAdminPassword(nextSettings.adminPassword),
+    adminPassword: hasExplicitAdminPassword ? resolveAdminPassword(nextSettings.adminPassword) : "",
     theme: normalizeThemeSettings(nextSettings.theme),
   };
 }
@@ -282,16 +381,26 @@ function normalizeAdminData(rawData = {}, fallback = buildBaseAdminData()) {
 }
 
 function normalizeLeadItem(item = {}, index = 0) {
+  const createdAt = item.createdAt || item.created_at || item.timestamp || item.submitted_at || new Date().toISOString();
+  const status = normalizeLeadStatus(item.status);
+  const intent = String(item.intent || item.leadType || item.lead_type || "general").trim().toLowerCase();
+
   return {
     id: item.id || makeId("lead", index),
     name: item.name || item.customer_name || "Unknown lead",
     phone: item.phone || item.customer_phone || "",
-    leadType: item.leadType || item.lead_type || item.intent || "general",
+    intent,
+    leadType: intent,
+    propertyType: item.propertyType || item.property_type || "",
     locality: item.locality || item.preferred_locality || "",
     budget: item.budget || item.budget_range || item.expected_price || "",
+    timeline: item.timeline || item.timelineToSell || item.timeline_to_sell || "",
     sourcePage: item.sourcePage || item.source_page || "Unknown source",
-    timestamp: item.timestamp || item.submitted_at || new Date().toISOString(),
-    status: item.status || "new",
+    timestamp: item.timestamp || createdAt,
+    createdAt,
+    lastUpdatedAt: item.lastUpdatedAt || item.last_updated_at || item.updatedAt || item.updated_at || createdAt,
+    status,
+    score: inferLeadScore(item, status),
     notes: item.notes || "",
   };
 }
@@ -304,18 +413,21 @@ async function parseJsonSafely(response) {
   }
 }
 
-async function fetchAdminAction(action) {
-  if (!ADMIN_APPS_SCRIPT_URL) {
+async function fetchAdminAction(action, { password = "", urlOverride = ADMIN_APPS_SCRIPT_URL } = {}) {
+  if (!urlOverride) {
     return {
       ok: false,
       skipped: true,
-      error: "Missing VITE_ADMIN_APPS_SCRIPT_URL",
+      error: "Missing Apps Script URL",
     };
   }
 
   try {
-    const url = new URL(ADMIN_APPS_SCRIPT_URL);
+    const url = new URL(urlOverride);
     url.searchParams.set("action", action);
+    if (password) {
+      url.searchParams.set("password", password);
+    }
 
     const response = await fetch(url.toString(), {
       method: "GET",
@@ -326,7 +438,7 @@ async function fetchAdminAction(action) {
 
     const data = await parseJsonSafely(response);
 
-    if (!response.ok) {
+    if (!response.ok || data?.success === false) {
       return {
         ok: false,
         skipped: false,
@@ -352,7 +464,7 @@ async function fetchAdminAction(action) {
   }
 }
 
-async function postAdminAction(action, payload) {
+async function postAdminAction(action, payload, { password = "" } = {}) {
   if (!ADMIN_APPS_SCRIPT_URL) {
     return {
       ok: false,
@@ -370,6 +482,7 @@ async function postAdminAction(action, payload) {
       },
       body: JSON.stringify({
         action,
+        password,
         saved_at: new Date().toISOString(),
         ...payload,
       }),
@@ -377,7 +490,7 @@ async function postAdminAction(action, payload) {
 
     const data = await parseJsonSafely(response);
 
-    if (!response.ok) {
+    if (!response.ok || data?.success === false) {
       return {
         ok: false,
         skipped: false,
@@ -401,11 +514,11 @@ async function postAdminAction(action, payload) {
   }
 }
 
-async function postAdminSection(section, payload) {
+async function postAdminSection(section, payload, { password = "" } = {}) {
   return postAdminAction("save-admin-section", {
     section,
     payload,
-  });
+  }, { password });
 }
 
 export function getDefaultAdminPassword() {
@@ -437,46 +550,91 @@ export function getAdminLitePassword(settings) {
   return getDefaultAdminPassword();
 }
 
+export function getAdminSessionPassword() {
+  return String(getSessionStorageItem(ADMIN_SESSION_PASSWORD_STORAGE_KEY) || "").trim();
+}
+
+export function setAdminSessionPassword(password) {
+  const trimmedPassword = String(password || "").trim();
+
+  if (!trimmedPassword) {
+    return;
+  }
+
+  setSessionStorageItem(ADMIN_SESSION_PASSWORD_STORAGE_KEY, trimmedPassword);
+}
+
+export function clearAdminSessionPassword() {
+  removeSessionStorageItem(ADMIN_SESSION_PASSWORD_STORAGE_KEY);
+}
+
+export async function verifyAdminPassword(password) {
+  const trimmedPassword = String(password || "").trim();
+
+  if (!trimmedPassword) {
+    return {
+      ok: false,
+      skipped: false,
+      error: "Admin password is required.",
+    };
+  }
+
+  if (!ADMIN_APPS_SCRIPT_URL) {
+    return {
+      ok: trimmedPassword === getDefaultAdminPassword(),
+      skipped: true,
+      source: "local",
+      error: trimmedPassword === getDefaultAdminPassword() ? "" : "Incorrect password.",
+    };
+  }
+
+  const result = await postAdminAction("verify-admin-password", {}, { password: trimmedPassword });
+
+  if (result.ok && result.data?.success !== false) {
+    setAdminSessionPassword(trimmedPassword);
+    return {
+      ok: true,
+      skipped: false,
+      source: "remote",
+    };
+  }
+
+  return {
+    ok: false,
+    skipped: false,
+    error: result.error || result.data?.message || "Incorrect password.",
+  };
+}
+
 export function getFallbackAdminData() {
   return buildFallbackAdminData();
 }
 
 export async function fetchAdminSettings() {
-  if (!ADMIN_APPS_SCRIPT_URL) {
-    const fallbackData = buildFallbackAdminData();
+  if (PUBLIC_APPS_SCRIPT_URL) {
+    const result = await fetchAdminAction("fetch-site-content", {
+      urlOverride: PUBLIC_APPS_SCRIPT_URL,
+    });
 
-    return {
-      ok: true,
-      skipped: true,
-      source: "local",
-      data: fallbackData.settings,
-    };
+    if (result.ok) {
+      return {
+        ok: true,
+        skipped: false,
+        source: "remote",
+        data: normalizeSettings(result.data?.data?.settings || result.data?.settings || {}),
+      };
+    }
   }
-
-  const result = await fetchAdminAction("fetch-admin-data");
-
-  if (!result.ok) {
-    const fallbackData = buildFallbackAdminData();
-
-    return {
-      ...result,
-      data: fallbackData.settings,
-    };
-  }
-
-  const settings = normalizeSettings(result.data?.data?.settings || result.data?.settings || {});
-
-  persistSettingsLocally(settings);
 
   return {
     ok: true,
-    skipped: false,
-    source: "remote",
-    data: settings,
+    skipped: true,
+    source: "local",
+    data: buildFallbackAdminData().settings,
   };
 }
 
-export async function fetchAdminData() {
+export async function fetchAdminData(password = getAdminSessionPassword()) {
   if (!ADMIN_APPS_SCRIPT_URL) {
     const fallbackData = buildFallbackAdminData();
 
@@ -488,7 +646,7 @@ export async function fetchAdminData() {
     };
   }
 
-  const result = await fetchAdminAction("fetch-admin-data");
+  const result = await fetchAdminAction("fetch-admin-data", { password });
 
   if (!result.ok) {
     const fallbackData = buildFallbackAdminData();
@@ -522,7 +680,9 @@ export async function fetchLeadInbox() {
     };
   }
 
-  const result = await fetchAdminAction("fetch-leads");
+  const result = await fetchAdminAction("fetch-leads", {
+    password: getAdminSessionPassword(),
+  });
 
   if (!result.ok) {
     return {
@@ -544,10 +704,11 @@ export async function fetchLeadInbox() {
 }
 
 export async function updateLeadStatus(leadId, status) {
+  const password = getAdminSessionPassword();
   return postAdminAction("update-lead-status", {
     lead_id: leadId,
     status,
-  });
+  }, { password });
 }
 
 
@@ -562,7 +723,9 @@ export async function saveSettings(payload) {
   persistAdminDataLocally(nextAdminData);
   persistSettingsLocally(normalizedPayload);
 
-  const result = await postAdminSection("settings", normalizedPayload);
+  const result = await postAdminSection("settings", normalizedPayload, {
+    password: getAdminSessionPassword(),
+  });
 
   return result;
 }
@@ -576,7 +739,9 @@ export async function saveProperties(payload) {
     properties: normalizedPayload,
   });
 
-  return postAdminSection("properties", normalizedPayload);
+  return postAdminSection("properties", normalizedPayload, {
+    password: getAdminSessionPassword(),
+  });
 }
 
 export async function saveLocalities(payload) {
@@ -588,7 +753,9 @@ export async function saveLocalities(payload) {
     localities: normalizedPayload,
   });
 
-  return postAdminSection("localities", normalizedPayload);
+  return postAdminSection("localities", normalizedPayload, {
+    password: getAdminSessionPassword(),
+  });
 }
 
 export async function saveTestimonials(payload) {
@@ -600,7 +767,9 @@ export async function saveTestimonials(payload) {
     testimonials: normalizedPayload,
   });
 
-  return postAdminSection("testimonials", normalizedPayload);
+  return postAdminSection("testimonials", normalizedPayload, {
+    password: getAdminSessionPassword(),
+  });
 }
 
 export async function saveFaq(payload) {
@@ -612,7 +781,9 @@ export async function saveFaq(payload) {
     faqs: normalizedPayload,
   });
 
-  return postAdminSection("faqs", normalizedPayload);
+  return postAdminSection("faqs", normalizedPayload, {
+    password: getAdminSessionPassword(),
+  });
 }
 
 export async function saveThemeSettings(themePayload, currentSettings = {}) {
@@ -624,7 +795,7 @@ export async function saveThemeSettings(themePayload, currentSettings = {}) {
   return saveSettings(normalizedSettings);
 }
 
-export async function updateAdminPassword(newPassword, currentSettings = {}) {
+export async function updateAdminPassword(currentPassword, newPassword, currentSettings = {}) {
   const normalizedSettings = normalizeSettings({
     ...currentSettings,
     adminPassword: newPassword,
@@ -638,13 +809,18 @@ export async function updateAdminPassword(newPassword, currentSettings = {}) {
 
   const result = await postAdminAction("update-admin-password", {
     payload: {
+      currentPassword,
       adminPassword: normalizedSettings.adminPassword,
     },
+  }, {
+    password: getAdminSessionPassword(),
   });
 
   if (!result.ok && !result.skipped) {
     return result;
   }
+
+  setAdminSessionPassword(normalizedSettings.adminPassword);
 
   return {
     ...result,

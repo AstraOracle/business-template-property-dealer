@@ -12,7 +12,7 @@ export function AdminPasswordGate({ hasConfiguredPassword, helperText, isLoading
     return helperText || "Enter the current admin password to open the hidden content editor.";
   }, [hasConfiguredPassword, helperText]);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
 
     if (isLoading) {
@@ -24,7 +24,7 @@ export function AdminPasswordGate({ hasConfiguredPassword, helperText, isLoading
       return;
     }
 
-    const success = onUnlock(password);
+    const success = await onUnlock(password);
 
     if (!success) {
       setError("Incorrect password. Please try again.");

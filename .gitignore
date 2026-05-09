@@ -18,3 +18,5 @@ exec
 ls
 run
 vercel
+playwright-report
+test-results

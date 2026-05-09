@@ -77,6 +77,11 @@ var SECTION_HEADERS = {
   leads: [
     "id",
     "timestamp",
+    "createdAt",
+    "lastUpdatedAt",
+    "status",
+    "score",
+    "intent",
     "sourcePage",
     "leadType",
     "inquiryType",
@@ -85,6 +90,7 @@ var SECTION_HEADERS = {
     "city",
     "budget",
     "propertyType",
+    "timeline",
     "expectedPrice",
     "timelineToSell",
     "name",
@@ -92,7 +98,6 @@ var SECTION_HEADERS = {
     "notes",
     "businessName",
     "requirement",
-    "status",
   ],
 };
 
@@ -114,7 +119,15 @@ function doGet(e) {
   try {
     var action = getAction_(e);
 
+    if (action === "fetch-site-content") {
+      return jsonResponse_({
+        success: true,
+        data: buildPublicSiteContentResponse_(),
+      });
+    }
+
     if (action === "fetch-admin-data") {
+      requireAdminPassword_(e && e.parameter && e.parameter.password);
       return jsonResponse_({
         success: true,
         data: buildAdminDataResponse_(),
@@ -122,6 +135,7 @@ function doGet(e) {
     }
 
     if (action === "fetch-leads") {
+      requireAdminPassword_(e && e.parameter && e.parameter.password);
       return jsonResponse_({
         success: true,
         data: getLeadRows_(),
@@ -150,14 +164,25 @@ function doPost(e) {
     }
 
     if (action === "save-admin-section") {
+      requireAdminPassword_(payload.password);
       return handleSaveAdminSection_(payload);
     }
 
+    if (action === "verify-admin-password") {
+      requireAdminPassword_(payload.password);
+      return jsonResponse_({
+        success: true,
+        message: "Admin password verified.",
+      });
+    }
+
     if (action === "update-admin-password") {
+      requireAdminPassword_(payload.password);
       return handleUpdateAdminPassword_(payload);
     }
 
     if (action === "update-lead-status") {
+      requireAdminPassword_(payload.password);
       return handleUpdateLeadStatus_(payload);
     }
 
@@ -193,13 +218,15 @@ function handleSaveAdminSection_(payload) {
   }
 
   if (section === "settings") {
-    var normalizedSettings = normalizeSettings_(sectionPayload || {});
+    var normalizedSettings = normalizeSettings_(
+      mergeSettingsPayload_(getSettingsRow_(), sectionPayload || {}),
+    );
     writeRows_(SHEET_NAMES.settings, [flattenSettings_(normalizedSettings)], SECTION_HEADERS.settings, true);
 
     return jsonResponse_({
       success: true,
       message: "Settings saved",
-      data: normalizedSettings,
+      data: sanitizeSettingsForClient_(normalizedSettings),
     });
   }
 
@@ -214,8 +241,11 @@ function handleSaveAdminSection_(payload) {
 }
 
 function handleUpdateAdminPassword_(payload) {
+  var currentPassword = String(payload.payload && payload.payload.currentPassword || "").trim();
+  requireAdminPassword_(currentPassword);
+
   var settings = getSettingsRow_();
-  settings.adminPassword = String(payload.payload && payload.payload.adminPassword || "").trim();
+  settings.adminPassword = hashAdminPassword_(String(payload.payload && payload.payload.adminPassword || "").trim());
   var normalizedSettings = normalizeSettings_(settings);
 
   writeRows_(SHEET_NAMES.settings, [flattenSettings_(normalizedSettings)], SECTION_HEADERS.settings, true);
@@ -223,13 +253,13 @@ function handleUpdateAdminPassword_(payload) {
   return jsonResponse_({
     success: true,
     message: "Admin password updated",
-    data: normalizedSettings,
+    data: sanitizeSettingsForClient_(normalizedSettings),
   });
 }
 
 function handleUpdateLeadStatus_(payload) {
   var leadId = String(payload.lead_id || "").trim();
-  var status = String(payload.status || "").trim();
+  var status = normalizeLeadStatus_(payload.status);
 
   if (!leadId || !status) {
     throw new Error("Lead ID and status are required.");
@@ -245,10 +275,14 @@ function handleUpdateLeadStatus_(payload) {
   var headers = values[0];
   var idIndex = headers.indexOf("id");
   var statusIndex = headers.indexOf("status");
+  var lastUpdatedIndex = headers.indexOf("lastUpdatedAt");
 
   for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
     if (String(values[rowIndex][idIndex]) === leadId) {
       sheet.getRange(rowIndex + 1, statusIndex + 1).setValue(status);
+      if (lastUpdatedIndex !== -1) {
+        sheet.getRange(rowIndex + 1, lastUpdatedIndex + 1).setValue(new Date().toISOString());
+      }
       return jsonResponse_({
         success: true,
         message: "Lead status updated",
@@ -261,7 +295,17 @@ function handleUpdateLeadStatus_(payload) {
 
 function buildAdminDataResponse_() {
   return {
-    settings: getSettingsRow_(),
+    settings: sanitizeSettingsForClient_(getSettingsRow_()),
+    properties: getSectionRows_("properties"),
+    localities: getSectionRows_("localities"),
+    testimonials: getSectionRows_("testimonials"),
+    faqs: getSectionRows_("faqs"),
+  };
+}
+
+function buildPublicSiteContentResponse_() {
+  return {
+    settings: sanitizeSettingsForClient_(getSettingsRow_()),
     properties: getSectionRows_("properties"),
     localities: getSectionRows_("localities"),
     testimonials: getSectionRows_("testimonials"),
@@ -343,6 +387,52 @@ function flattenSettings_(settings) {
   };
 }
 
+function sanitizeSettingsForClient_(settings) {
+  return {
+    businessName: settings.businessName || "",
+    phone: settings.phone || "",
+    whatsappNumber: settings.whatsappNumber || "",
+    email: settings.email || "",
+    address: settings.address || "",
+    heroHeadline: settings.heroHeadline || "",
+    heroSubheadline: settings.heroSubheadline || "",
+    primaryCTA: settings.primaryCTA || "",
+    secondaryCTA: settings.secondaryCTA || "",
+    logoUrl: settings.logoUrl || "",
+    heroImageUrl: settings.heroImageUrl || "",
+    mapEmbedUrl: settings.mapEmbedUrl || "",
+    theme: settings.theme || {
+      presetId: "modern-blue",
+      primaryColorOverride: "",
+    },
+  };
+}
+
+function mergeSettingsPayload_(existingSettings, incomingSettings) {
+  var nextSettings = cloneObject_(existingSettings || {});
+  var nextTheme = cloneObject_(existingSettings && existingSettings.theme || {});
+
+  Object.keys(incomingSettings || {}).forEach(function (key) {
+    var value = incomingSettings[key];
+
+    if (key === "theme" && isPlainObject_(value)) {
+      Object.keys(value).forEach(function (themeKey) {
+        if (value[themeKey] !== undefined && value[themeKey] !== null && value[themeKey] !== "") {
+          nextTheme[themeKey] = value[themeKey];
+        }
+      });
+      return;
+    }
+
+    if (value !== undefined && value !== null && value !== "") {
+      nextSettings[key] = value;
+    }
+  });
+
+  nextSettings.theme = nextTheme;
+  return nextSettings;
+}
+
 function normalizeSectionRows_(section, payload) {
   return ensureArray_(payload).map(function (row) {
     return normalizeSectionRow_(section, row);
@@ -369,10 +459,14 @@ function normalizeSectionRow_(section, row) {
 
 function normalizeLead_(row) {
   var nextRow = cloneObject_(row || {});
+  var createdAt = nextRow.createdAt || nextRow.timestamp || new Date().toISOString();
 
   nextRow.id = nextRow.id || createLeadId_();
-  nextRow.timestamp = nextRow.timestamp || new Date().toISOString();
+  nextRow.createdAt = createdAt;
+  nextRow.timestamp = nextRow.timestamp || createdAt;
+  nextRow.lastUpdatedAt = nextRow.lastUpdatedAt || nextRow.updatedAt || createdAt;
   nextRow.sourcePage = nextRow.sourcePage || "";
+  nextRow.intent = normalizeLeadIntent_(nextRow.intent || nextRow.leadType || "");
   nextRow.leadType = nextRow.leadType || nextRow.intent || "";
   nextRow.inquiryType = nextRow.inquiryType || "";
   nextRow.propertyTitle = nextRow.propertyTitle || "";
@@ -380,6 +474,7 @@ function normalizeLead_(row) {
   nextRow.city = nextRow.city || "";
   nextRow.budget = nextRow.budget || "";
   nextRow.propertyType = nextRow.propertyType || "";
+  nextRow.timeline = nextRow.timeline || nextRow.timelineToSell || "";
   nextRow.expectedPrice = nextRow.expectedPrice || "";
   nextRow.timelineToSell = nextRow.timelineToSell || "";
   nextRow.name = nextRow.name || "";
@@ -387,7 +482,8 @@ function normalizeLead_(row) {
   nextRow.notes = nextRow.notes || "";
   nextRow.businessName = nextRow.businessName || "";
   nextRow.requirement = nextRow.requirement || "";
-  nextRow.status = nextRow.status || "new";
+  nextRow.status = normalizeLeadStatus_(nextRow.status);
+  nextRow.score = normalizeLeadScore_(nextRow.score, inferLeadScore_(nextRow));
 
   return nextRow;
 }
@@ -582,6 +678,74 @@ function normalizeBooleanField_(value) {
   return false;
 }
 
+function normalizeLeadIntent_(value) {
+  var normalized = String(value || "").trim().toLowerCase();
+
+  if (normalized === "buy" || normalized === "rent" || normalized === "sell") {
+    return normalized;
+  }
+
+  return normalized || "general";
+}
+
+function normalizeLeadStatus_(value) {
+  var normalized = String(value || "").trim().toLowerCase().replace(/\s+/g, "_");
+
+  if (normalized === "contacted" || normalized === "follow_up") {
+    return "Contacted";
+  }
+
+  if (normalized === "closed") {
+    return "Closed";
+  }
+
+  return "New";
+}
+
+function normalizeLeadScore_(value, fallback) {
+  var normalized = String(value || "").trim().toUpperCase();
+
+  if (normalized === "HOT" || normalized === "WARM" || normalized === "COLD") {
+    return normalized;
+  }
+
+  return fallback || "WARM";
+}
+
+function isHotTimeline_(timeline) {
+  var normalized = String(timeline || "").trim().toLowerCase();
+  return normalized === "immediate" || normalized === "within 30 days" || normalized === "within 1 month";
+}
+
+function isWarmTimeline_(timeline) {
+  var normalized = String(timeline || "").trim().toLowerCase();
+  return normalized === "within 60 days" || normalized === "within 90 days" || normalized === "within 1-3 months" || normalized === "within 3 months";
+}
+
+function inferLeadScore_(lead) {
+  var hasBudget = String(lead.budget || "").trim() !== "";
+  var hasLocality = String(lead.locality || "").trim() !== "";
+  var hasPropertyType = String(lead.propertyType || "").trim() !== "";
+
+  if (hasBudget && isHotTimeline_(lead.timeline)) {
+    return "HOT";
+  }
+
+  if ((hasBudget || hasLocality || hasPropertyType) && isWarmTimeline_(lead.timeline)) {
+    return "WARM";
+  }
+
+  if (!hasBudget) {
+    return "COLD";
+  }
+
+  if (hasBudget && (hasLocality || hasPropertyType)) {
+    return "WARM";
+  }
+
+  return "COLD";
+}
+
 function createLeadId_() {
   return "lead-" + new Date().getTime();
 }
@@ -594,6 +758,58 @@ function getSpreadsheet_() {
   }
 
   return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function getStoredAdminPassword_() {
+  var settings = getSettingsRow_();
+  var password = String(settings.adminPassword || "").trim();
+  return password || hashAdminPassword_("change-me-admin");
+}
+
+function isAdminPasswordValid_(password) {
+  var providedPassword = String(password || "").trim();
+  var storedPassword = getStoredAdminPassword_();
+
+  if (!providedPassword || !storedPassword) {
+    return false;
+  }
+
+  if (storedPassword.indexOf("sha256:") === 0) {
+    return hashAdminPassword_(providedPassword) === storedPassword;
+  }
+
+  return providedPassword === storedPassword;
+}
+
+function requireAdminPassword_(password) {
+  if (!isAdminPasswordValid_(password)) {
+    throw new Error("Invalid admin password.");
+  }
+}
+
+function hashAdminPassword_(password) {
+  var rawPassword = String(password || "").trim();
+
+  if (!rawPassword) {
+    return "";
+  }
+
+  if (rawPassword.indexOf("sha256:") === 0) {
+    return rawPassword;
+  }
+
+  var digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    rawPassword,
+    Utilities.Charset.UTF_8,
+  );
+
+  var hex = digest.map(function (value) {
+    var normalized = value < 0 ? value + 256 : value;
+    return normalized.toString(16).padStart(2, "0");
+  }).join("");
+
+  return "sha256:" + hex;
 }
 
 function parseRequestBody_(e) {
