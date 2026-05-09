@@ -70,6 +70,12 @@ Set your preview URL in PowerShell:
 $env:PLAYWRIGHT_BASE_URL="https://your-staging-url.vercel.app"
 ```
 
+If your Vercel preview deployments are protected by Vercel Authentication, also set:
+
+```powershell
+$env:VERCEL_AUTOMATION_BYPASS_SECRET="your-vercel-bypass-secret"
+```
+
 Then run:
 
 ```powershell

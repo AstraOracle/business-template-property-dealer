@@ -9,6 +9,8 @@ export default [
       "node_modules/**",
       ".vercel/**",
       "coverage/**",
+      "playwright-report/**",
+      "test-results/**",
       "google-apps-script/**",
       "docs/**",
       "--debug",

@@ -1,5 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const extraHTTPHeaders = process.env.VERCEL_AUTOMATION_BYPASS_SECRET
+  ? {
+      "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+      "x-vercel-set-bypass-cookie": "true",
+    }
+  : undefined;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
@@ -10,6 +17,7 @@ export default defineConfig({
     baseURL: process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:4173",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    extraHTTPHeaders,
   },
   projects: [
     {
